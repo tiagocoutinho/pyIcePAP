@@ -307,7 +307,7 @@ class SocketCom:
                             answer = answer + self._socket.recv(size)
                     self.log.debug('RAW_DATA read: {0}'.format(repr(answer)))
                     return answer.decode(ICEPAP_ENCODING)
-        except Exception as e:
+        except BaseException as e:
             self._start_thread()
             raise RuntimeError('Communication error: Error sending command to '
                                'the IcePAP ({0})'.format(e))
