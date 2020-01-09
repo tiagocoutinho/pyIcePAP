@@ -181,8 +181,6 @@ def stat(*motors, style='BOX_ROUNDED'):
     headers = ('Addr', 'Name', 'Pos.', 'Ready', 'Alive', 'Pres.', 'Enab.',
                'Power', '5V', 'Lim-', 'Lim+', 'Warn')
     data = []
-    if not motors:
-        motors = [zoom, focus]
     group = Group(motors)
     table = Table(headers, style=style)
     for motor, name, state, pos in zip(group.motors, group.names,
