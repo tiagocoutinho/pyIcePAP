@@ -177,7 +177,7 @@ def bool_text_color_inv(data, text_false='NO', text_true='YES'):
                            terminal.bright_red)
 
 
-def stat(*motors, style='BOX_ROUNDED'):
+def _stat_table(*motors, style='BOX_ROUNDED'):
     headers = ('Addr', 'Name', 'Pos.', 'Ready', 'Alive', 'Pres.', 'Enab.',
                'Power', '5V', 'Lim-', 'Lim+', 'Warn')
     data = []
@@ -196,8 +196,39 @@ def stat(*motors, style='BOX_ROUNDED'):
                bool_text_color_inv(state.is_limit_positive(), 'OFF', 'ON'),
                bool_text_color_inv(state.is_warning()))
         table.append_row(row)
-    print(table)
+    return table
 
+
+def stat(*motors, style='BOX_ROUNDED'):
+    print(_stat_table(*motors, style=style))
+
+
+def _info_table(*motors, style='BOX_ROUNDED'):
+    headers = ('Addr', 'Name', 'Pos.', 'Ready', 'Vel.', 'Acc. T.')
+    data = []
+    group = Group(motors)
+    table = Table(headers, style=style)
+    data = zip(group.motors, group.names, group.states, group.fpositions,
+               group.acctimes, group.velocities)
+    for motor, name, state, pos, acctime, velocity in data:
+        row = (motor.axis, name, pos,
+               bool_text_color(state.is_ready()), velocity, acctime)
+        table.append_row(row)
+    return table
+
+
+def _info(*motors, style='BOX_ROUNDED'):
+    print(_info_table(*motors, style=style))
+
+
+def _to_axes_arg(pap, axes):
+    if axes == 'all':
+        axes = pap.find_axes(only_alive=False)
+    elif axes == 'alive':
+        axes = pap.find_axes(only_alive=True)
+    else:
+        axes = (int(i) for i in axes.split(','))
+    return axes
 
 # -----
 import click
@@ -230,18 +261,29 @@ def umv(ctx, pairs, bar):
 @click.pass_context
 def status(ctx, axes, compact, ascii):
     pap = ctx.obj['icepap']
-    if axes == 'all':
-        axes = pap.find_axes(only_alive=False)
-    elif axes == 'alive':
-        axes = pap.find_axes(only_alive=True)
-    else:
-        axes = (int(i) for i in axes.split(','))
+    axes = _to_axes_arg(pap, axes)
     motors = (pap[axis] for axis in axes)
     if compact or ascii:
         style = 'COMPACT'
     else:
         style = 'BOX_ROUNDED'
     stat(*motors, style=style)
+
+
+@cli.command()
+@click.option('--axes', type=str, default='all')
+@click.option('--compact', type=str, default=False, is_flag=True)
+@click.option('--ascii', type=str, default=False, is_flag=True)
+@click.pass_context
+def info(ctx, axes, compact, ascii):
+    pap = ctx.obj['icepap']
+    axes = _to_axes_arg(pap, axes)
+    motors = (pap[axis] for axis in axes)
+    if compact or ascii:
+        style = 'COMPACT'
+    else:
+        style = 'BOX_ROUNDED'
+    _info(*motors, style=style)
 
 
 if __name__ == '__main__':
