@@ -1,3 +1,4 @@
+import click
 import time
 import itertools
 import contextlib
@@ -25,7 +26,7 @@ class ProgressBar(tqdm.tqdm):
         for lock in self.get_lock().locks:
             try:
                 lock.release()
-            except:
+            except Exception:
                 pass
 
 
@@ -64,7 +65,7 @@ def _motion_pos_human(motion):
                                                       group.fpositions,
                                                       motion.target_positions):
         color = terminal.bright_blue if state.is_moving() else lambda x: x
-        msg ='{}[{} => {}]: {}'.format(name, start, target, color(str(pos)))
+        msg = '{}[{} => {}]: {}'.format(name, start, target, color(str(pos)))
         messages.append(msg)
     return ' | '.join(messages)
 
@@ -80,7 +81,8 @@ def _umove(group, positions):
             stack.enter_context(motion)
             motion.start()
             while motion.in_motion:
-                print('{}{}'.format(CLEAR_LINE, _motion_pos_human(motion)), end='\r', flush=True)
+                print('{}{}'.format(CLEAR_LINE, _motion_pos_human(
+                    motion)), end='\r', flush=True)
                 time.sleep(0.1)
     finally:
         print('\r{}{}'.format(CLEAR_LINE, _motion_pos_human(motion)))
@@ -141,7 +143,7 @@ def pmove(*pair_motor_pos):
     _pmove(Group(motors), positions)
 
 
-#------
+# ------
 
 def Table(headers=(), **kwargs):
     style = kwargs.pop('style', beautifultable.STYLE_BOX_ROUNDED)
@@ -180,7 +182,6 @@ def bool_text_color_inv(data, text_false='NO', text_true='YES'):
 def _stat_table(*motors, style='BOX_ROUNDED'):
     headers = ('Addr', 'Name', 'Pos.', 'Ready', 'Alive', 'Pres.', 'Enab.',
                'Power', '5V', 'Lim-', 'Lim+', 'Warn')
-    data = []
     group = Group(motors)
     table = Table(headers, style=style)
     for motor, name, state, pos in zip(group.motors, group.names,
@@ -230,8 +231,9 @@ def _to_axes_arg(pap, axes):
         axes = (int(i) for i in axes.split(','))
     return axes
 
+
 # -----
-import click
+
 
 @click.group()
 @click.option('-h', '--host')

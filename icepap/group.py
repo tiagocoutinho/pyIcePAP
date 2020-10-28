@@ -92,7 +92,6 @@ def group(obj: Union[Group, IcePAPAxis, Sequence]):
         group = obj
     elif isinstance(obj, IcePAPAxis):
         group = Group([obj])
-        target_positions = [target_positions]
     elif isinstance(obj, collections.abc.Sequence):
         group = Group(obj)
     else:
