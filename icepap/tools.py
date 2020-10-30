@@ -30,9 +30,10 @@ def ensure_power(obj, on=True):
         assert (m1.power, m2.power) == (False, True)
     """
     g = group(obj)
-    to_power = [addr for addr, power in zip(g.axes, g.powers) if power != on]
+    ctrl = g.controller
+    to_power = [addr for addr, power in zip(g.axes, g.get_power()) if power != on]
     if to_power:
-        g.controller.set_power(to_power, on)
+        ctrl.set_power(to_power, on)
     yield g
     if to_power:
-        g.controller.set_power(to_power, not on)
+        ctrl.set_power(to_power, not on)

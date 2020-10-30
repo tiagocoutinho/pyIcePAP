@@ -1,10 +1,11 @@
-import click
+
 import time
+import shutil
 import itertools
 import contextlib
 
 import tqdm
-import blessings
+import click
 import beautifultable
 
 from .group import Group
@@ -12,9 +13,8 @@ from .tools import ensure_power
 from .motion import Motion
 from .controller import IcePAPController
 
-CLEAR_LINE = '\x1b[2K'
 
-terminal = blessings.Terminal()
+CLEAR_LINE = '\x1b[2K'
 
 
 class ProgressBar(tqdm.tqdm):
@@ -40,7 +40,7 @@ def iter_move(group, positions, on_start_stop=None, on_end_stop=None):
         stack.enter_context(motion)
         yield motion
         motion.start()
-        while motion.in_motion:
+        while motion.in_motion():
             yield motion
 
 
@@ -48,49 +48,52 @@ def _start_stop(etype, evalue, tb):
     kb = etype is KeyboardInterrupt
     if evalue is not None:
         err = 'Ctrl-C pressed' if kb else 'Error: {!r}'.format(evalue)
-        print(terminal.red('\n{}. Stopping all motors'.format(err)))
-    print('Waiting for motors to stop... ', end='', flush=True)
+        click.secho('\n{}. Stopping all motors'.format(err), fg="red")
+    click.echo('Waiting for motors to stop... ', nl=False)
 
 
 def _end_stop():
-    print('[DONE]')
+    click.echo('[DONE]')
 
 
 def _motion_pos_human(motion):
     messages = []
     group = motion.group
-    for motor, name, state, start, pos, target in zip(group.motors, group.names,
-                                                      group.states,
-                                                      motion.start_positions,
-                                                      group.fpositions,
-                                                      motion.target_positions):
-        color = terminal.bright_blue if state.is_moving() else lambda x: x
-        msg = '{}[{} => {}]: {}'.format(name, start, target, color(str(pos)))
+    args = (group.motors, group.get_names(), group.get_states(),
+            motion.start_positions, group.get_fpos(), motion.target_positions)
+    for motor, name, state, start, pos, target in zip(*args):
+        fg = "bright_blue" if state.is_moving() else None
+        str_pos = click.style(str(pos), fg=fg)
+        msg = '{}[{} => {}]: {}'.format(name, start, target, str_pos)
         messages.append(msg)
     return ' | '.join(messages)
 
 
 def _umove(group, positions):
-    try:
-        with contextlib.ExitStack() as stack:
-            power = ensure_power(group)
-            motion = Motion(group, positions,
-                            on_start_stop=_start_stop,
-                            on_end_stop=_end_stop)
-            stack.enter_context(power)
-            stack.enter_context(motion)
-            motion.start()
-            while motion.in_motion:
-                print('{}{}'.format(CLEAR_LINE, _motion_pos_human(
-                    motion)), end='\r', flush=True)
-                time.sleep(0.1)
-    finally:
-        print('\r{}{}'.format(CLEAR_LINE, _motion_pos_human(motion)))
+    with contextlib.ExitStack() as stack:
+        power = ensure_power(group)
+        motion = Motion(group, positions,
+                        on_start_stop=_start_stop,
+                        on_end_stop=_end_stop)
+        stack.enter_context(power)
+        stack.enter_context(motion)
+        motion.start()
+        last_update = 0
+        try:
+            while motion.in_motion():
+                nap = 0.1 - (time.monotonic() - last_update)
+                if nap > 0:
+                    time.sleep(nap)
+                click.echo('{}{}\r'.format(CLEAR_LINE, _motion_pos_human(
+                    motion)), nl=False)
+                last_update = time.monotonic()
+        finally:
+            click.echo('\r{}{}'.format(CLEAR_LINE, _motion_pos_human(motion)))
 
 
 def _motion_progress_bars(group, motion, postfix):
     fmt = '{l_bar}{bar}| {elapsed}<{remaining}{postfix}'
-    args = zip(group.motors, group.names, motion.start_positions,
+    args = zip(group.motors, group.get_names(), motion.start_positions,
                motion.target_positions)
     bars = []
     for i, (motor, name, start_pos, target_pos) in enumerate(args):
@@ -120,17 +123,21 @@ def _pmove(group, positions):
         bars = _motion_progress_bars(group, motion, postfix)
         for bar in bars:
             stack.enter_context(bar)
+        last_update = 0
         for _ in imove:
-            states, positions = group.states, group.fpositions
-            args = zip(bars, states, positions)
-            for bar, state, pos in args:
+            states, positions = group.get_states(), group.get_fpos()
+            nap = 0.1 - (time.monotonic() - last_update)
+            if nap > 0:
+                time.sleep(nap)
+            args = (bars, states, positions)
+            for bar, state, pos in zip(*args):
                 bar.set_postfix(**postfix(pos))
                 step = abs(pos - bar.start_pos)
                 update = step - bar.last_step
                 if update > 0:
                     bar.update(update)
                 bar.last_step = step
-            time.sleep(0.1)
+            last_update = time.monotonic()
 
 
 def umove(*pair_motor_pos):
@@ -150,7 +157,7 @@ def Table(headers=(), **kwargs):
     if isinstance(style, str):
         style = beautifultable.Style['STYLE_{}'.format(style.upper())]
     table = beautifultable.BeautifulTable(
-        max_width=terminal.width - 1,
+        max_width=shutil.get_terminal_size().columns - 1,
         default_alignment=beautifultable.ALIGN_RIGHT, default_padding=1)
     table.column_headers = headers
     table.column_alignments[headers[0]] = beautifultable.ALIGN_LEFT
@@ -163,20 +170,18 @@ def bool_text(data, false='NO', true='YES'):
 
 
 def bool_text_color(data, text_false='NO', text_true='YES',
-                    color_false=terminal.bright_red,
-                    color_true=terminal.green):
+                    color_false="bright_red",
+                    color_true="green"):
     color = color_true if data else color_false
     text = bool_text(data, text_false, text_true)
-    text = color(text)
-    # BeautifulTable does not understand "Set character set to US, ie \x1b(B
-    text = text.replace('\x1b(B', '')
+    text = click.style(text, fg=color)
     return text
 
 
 def bool_text_color_inv(data, text_false='NO', text_true='YES'):
     return bool_text_color(data, text_false, text_true,
-                           terminal.green,
-                           terminal.bright_red)
+                           "green",
+                           "bright_red")
 
 
 def _stat_table(*motors, style='BOX_ROUNDED'):
@@ -184,8 +189,8 @@ def _stat_table(*motors, style='BOX_ROUNDED'):
                'Power', '5V', 'Lim-', 'Lim+', 'Warn')
     group = Group(motors)
     table = Table(headers, style=style)
-    for motor, name, state, pos in zip(group.motors, group.names,
-                                       group.states, group.fpositions):
+    args = (group.motors, group.get_names(), group.get_states(), group.get_fpos())
+    for motor, name, state, pos in zip(*args):
         row = (motor.axis, name, pos,
                bool_text_color(state.is_ready()),
                bool_text_color(state.is_alive()),
@@ -201,7 +206,7 @@ def _stat_table(*motors, style='BOX_ROUNDED'):
 
 
 def stat(*motors, style='BOX_ROUNDED'):
-    print(_stat_table(*motors, style=style))
+    click.echo(_stat_table(*motors, style=style))
 
 
 def _info_table(*motors, style='BOX_ROUNDED'):
@@ -209,9 +214,9 @@ def _info_table(*motors, style='BOX_ROUNDED'):
     data = []
     group = Group(motors)
     table = Table(headers, style=style)
-    data = zip(group.motors, group.names, group.states, group.fpositions,
-               group.acctimes, group.velocities)
-    for motor, name, state, pos, acctime, velocity in data:
+    args = (group.motors, group.get_names(), group.get_states(), group.get_fpos(),
+            group.get_acctime(), group.get_velocity())
+    for motor, name, state, pos, acctime, velocity in zip(*args):
         row = (motor.axis, name, pos,
                bool_text_color(state.is_ready()), velocity, acctime)
         table.append_row(row)
@@ -219,7 +224,7 @@ def _info_table(*motors, style='BOX_ROUNDED'):
 
 
 def _info(*motors, style='BOX_ROUNDED'):
-    print(_info_table(*motors, style=style))
+    click.echo(_info_table(*motors, style=style))
 
 
 def _to_axes_arg(pap, axes):
@@ -248,12 +253,35 @@ def cli(ctx, host, port):
 @click.argument('pairs', nargs=-1, type=int)
 @click.option('--bar', is_flag=True)
 @click.pass_context
-def umv(ctx, pairs, bar):
+def move(ctx, pairs, bar):
     pap = ctx.obj['icepap']
     motors = [pap[int(address)] for address in pairs[::2]]
     positions = [int(position) for position in pairs[1::2]]
     func = _pmove if bar else _umove
     func(Group(motors), positions)
+
+
+@cli.command()
+@click.argument('pairs', nargs=-1, type=int)
+@click.option('--bar', is_flag=True)
+@click.pass_context
+def rmove(ctx, pairs, bar):
+    raise NotImplementedError
+
+
+@cli.command()
+@click.argument('axes', nargs=-1, type=int)
+@click.option('--async')
+@click.pass_context
+def jog(ctx, axes):
+    raise NotImplementedError
+
+
+@cli.command()
+@click.argument('axes', nargs=-1, type=int)
+@click.pass_context
+def stop(ctx, axes):
+    raise NotImplementedError
 
 
 @cli.command()
@@ -280,7 +308,7 @@ def status(ctx, axes, compact, ascii):
 def info(ctx, axes, compact, ascii):
     pap = ctx.obj['icepap']
     axes = _to_axes_arg(pap, axes)
-    motors = (pap[axis] for axis in axes)
+    motors = [pap[axis] for axis in axes]
     if compact or ascii:
         style = 'COMPACT'
     else:

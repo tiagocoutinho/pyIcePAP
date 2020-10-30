@@ -12,7 +12,7 @@ class Motion:
         self.on_end_stop = on_end_stop or (lambda *args: None)
 
     def __enter__(self):
-        self.start_positions = self.group.fpositions
+        self.start_positions = self.group.get_fpos()
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -39,14 +39,12 @@ class Motion:
         except Exception as err:
             print(err)
 
-    @property
     def displacements(self):
         return [abs(target - start)
                 for target, start in zip(self.target_positions, self.start_positions)]
 
-    @property
     def in_motion(self):
-        return self.group.is_moving
+        return self.group.is_moving()
 
     def start(self):
         return self.group.start_move(self.target_positions)
