@@ -1,4 +1,3 @@
-
 import time
 import shutil
 import itertools
@@ -30,7 +29,8 @@ class ProgressBar(tqdm.tqdm):
                 pass
 
 
-def iter_move(group, positions, on_start_stop=None, on_end_stop=None):
+@contextlib.contextmanager
+def motion_with_power(group, positions, on_start_stop=None, on_end_stop=None):
     with contextlib.ExitStack() as stack:
         power = ensure_power(group)
         motion = Motion(group, positions,
@@ -39,9 +39,6 @@ def iter_move(group, positions, on_start_stop=None, on_end_stop=None):
         stack.enter_context(power)
         stack.enter_context(motion)
         yield motion
-        motion.start()
-        while motion.in_motion():
-            yield motion
 
 
 def _start_stop(etype, evalue, tb):
@@ -117,27 +114,27 @@ def _motion_progress_bars(group, motion, postfix):
 def _pmove(group, positions):
     def postfix(p):
         return dict(At='{:.3f}'.format(p))
-    imove = iter_move(group, positions, _start_stop, _end_stop)
-    motion = next(imove)
-    with contextlib.ExitStack() as stack:
-        bars = _motion_progress_bars(group, motion, postfix)
-        for bar in bars:
-            stack.enter_context(bar)
-        last_update = 0
-        for _ in imove:
-            states, positions = group.get_states(), group.get_fpos()
-            nap = 0.1 - (time.monotonic() - last_update)
-            if nap > 0:
-                time.sleep(nap)
-            args = (bars, states, positions)
-            for bar, state, pos in zip(*args):
-                bar.set_postfix(**postfix(pos))
-                step = abs(pos - bar.start_pos)
-                update = step - bar.last_step
-                if update > 0:
-                    bar.update(update)
-                bar.last_step = step
-            last_update = time.monotonic()
+    with motion_with_power(group, positions, _start_stop, _end_stop) as motion:
+        motion.start()
+        with contextlib.ExitStack() as stack:
+            bars = _motion_progress_bars(group, motion, postfix)
+            for bar in bars:
+                stack.enter_context(bar)
+            last_update = 0
+            while motion.in_motion():
+                states, positions = group.get_states(), group.get_fpos()
+                nap = 0.1 - (time.monotonic() - last_update)
+                if nap > 0:
+                    time.sleep(nap)
+                args = (bars, states, positions)
+                for bar, state, pos in zip(*args):
+                    bar.set_postfix(**postfix(pos))
+                    step = abs(pos - bar.start_pos)
+                    update = step - bar.last_step
+                    if update > 0:
+                        bar.update(update)
+                    bar.last_step = step
+                last_update = time.monotonic()
 
 
 def umove(*pair_motor_pos):
