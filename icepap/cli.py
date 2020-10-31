@@ -3,9 +3,9 @@ import shutil
 import itertools
 import contextlib
 
-import tqdm
 import click
 import beautifultable
+from prompt_toolkit.shortcuts import ProgressBar
 
 from .group import Group
 from .tools import ensure_power
@@ -14,19 +14,6 @@ from .controller import IcePAPController
 
 
 CLEAR_LINE = '\x1b[2K'
-
-
-class ProgressBar(tqdm.tqdm):
-
-    monitor_interval = 0
-
-    def close(self):
-        super().close()
-        for lock in self.get_lock().locks:
-            try:
-                lock.release()
-            except Exception:
-                pass
 
 
 @contextlib.contextmanager
@@ -88,58 +75,52 @@ def _umove(group, positions):
             click.echo('\r{}{}'.format(CLEAR_LINE, _motion_pos_human(motion)))
 
 
-def _motion_progress_bars(group, motion, postfix):
-    fmt = '{l_bar}{bar}| {elapsed}<{remaining}{postfix}'
+def umove(*pair_motor_pos):
+    motors, positions = pair_motor_pos[::2], pair_motor_pos[1::2]
+    _umove(Group(motors), positions)
+
+
+def motion_bar(motion, **kwargs):
+    def refresh():
+        states, positions = group.get_states(), group.get_pos()
+        for bar, state, pos in zip(bars, states, positions):
+            bar.label = bar.label_template.format(pos)
+            bar.items_completed = abs(pos - bar.start_pos)
+        progbar.invalidate()
+
+    progbar = ProgressBar(**kwargs)
+    progbar.refresh = refresh
+
+    group = motion.group
     args = zip(group.motors, group.get_names(), motion.start_positions,
                motion.target_positions)
     bars = []
     for i, (motor, name, start_pos, target_pos) in enumerate(args):
-        desc = '{} ({:g} -> {:g})'.format(name, start_pos, target_pos)
+        sp, tp = str(start_pos), str(target_pos)
+        max_width = max(len(sp), len(tp))
+        label_template = '{} [{} to {}] (at {{:{}}})'.format(name, sp, tp, max_width)
         displ = abs(target_pos - start_pos)
-        if displ == 0:
-            bar = ProgressBar(range(1), position=i, bar_format=fmt,
-                              postfix=postfix(start_pos), desc=desc)
-            bar.update(1)
-        else:
-            bar = ProgressBar(total=displ, position=i, bar_format=fmt,
-                              postfix=postfix(start_pos), desc=desc)
-        bar.motor = motor
+        bar = progbar(label=label_template.format(start_pos), total=displ)
+        bar.label_template = label_template
         bar.start_pos = start_pos
-        bar.target_pos = target_pos
-        bar.last_step = 0
         bars.append(bar)
-    return bars
+    return progbar
 
 
-def _pmove(group, positions):
-    def postfix(p):
-        return dict(At='{:.3f}'.format(p))
-    with motion_with_power(group, positions, _start_stop, _end_stop) as motion:
-        motion.start()
-        with contextlib.ExitStack() as stack:
-            bars = _motion_progress_bars(group, motion, postfix)
-            for bar in bars:
-                stack.enter_context(bar)
+def _pmove(group, positions, refresh_rate=0.1):
+    power = ensure_power(group)
+    motion = Motion(group, positions, on_start_stop=_start_stop, on_end_stop=_end_stop)
+    with power, motion:
+        with motion_bar(motion) as progbar:
+            motion.start()
             last_update = 0
             while motion.in_motion():
-                states, positions = group.get_states(), group.get_fpos()
-                nap = 0.1 - (time.monotonic() - last_update)
+                nap = refresh_rate - (time.monotonic() - last_update)
                 if nap > 0:
                     time.sleep(nap)
-                args = (bars, states, positions)
-                for bar, state, pos in zip(*args):
-                    bar.set_postfix(**postfix(pos))
-                    step = abs(pos - bar.start_pos)
-                    update = step - bar.last_step
-                    if update > 0:
-                        bar.update(update)
-                    bar.last_step = step
+                progbar.refresh()
                 last_update = time.monotonic()
-
-
-def umove(*pair_motor_pos):
-    motors, positions = pair_motor_pos[::2], pair_motor_pos[1::2]
-    _umove(Group(motors), positions)
+            progbar.refresh()
 
 
 def pmove(*pair_motor_pos):
