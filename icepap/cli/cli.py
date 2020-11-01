@@ -70,18 +70,21 @@ def umove(*pair_motor_pos):
 
 def _pmove(group, positions, refresh_period=0.1):
     power = ensure_power(group)
-    motion = Motion(group, positions, on_start_stop=_start_stop, on_end_stop=_end_stop)
-    with power, motion:
-        with MotionBar(motion) as progbar:
-            motion.start()
-            last_update, in_motion = 0, True
-            while in_motion:
-                nap = refresh_period - (time.monotonic() - last_update)
-                if nap > 0:
-                    time.sleep(nap)
-                progbar.update(motion.update())
-                in_motion = motion.in_motion()
-                last_update = time.monotonic()
+    motion = Motion(group, positions)
+    progbar = MotionBar(motion)
+    with progbar:
+        try:
+            with power, motion:
+                motion.start()
+                last_update, in_motion = 0, True
+                while in_motion:
+                    nap = refresh_period - (time.monotonic() - last_update)
+                    if nap > 0:
+                        time.sleep(nap)
+                    progbar.update(motion.update())
+                    in_motion = motion.in_motion()
+                    last_update = time.monotonic()
+        finally:
             progbar.update(motion.update())
 
 

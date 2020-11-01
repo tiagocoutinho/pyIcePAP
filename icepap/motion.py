@@ -17,11 +17,10 @@ class Motion:
         self.sync_stop = sync_stop
         self.on_start_stop = on_start_stop or (lambda *args: None)
         self.on_end_stop = on_end_stop or (lambda *args: None)
-        self.status = None
-
-    def __enter__(self):
         self.start_positions = pos = self.group.get_pos()
         self.status = self._get_status(pos=pos, start=pos)
+
+    def __enter__(self):
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):

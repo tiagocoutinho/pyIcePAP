@@ -99,16 +99,57 @@ STYLE = Style.from_dict({
     "time-left": "DarkKhaki"
 })
 
+class Title:
+
+    MOVING, STOPPING, STOPPED = range(3)
+
+    def __init__(self, motion):
+        self.motion = motion
+        self.state = self.MOVING
+        self.err = None
+
+    def error_title(self):
+        if type(self.err) is KeyboardInterrupt:
+            title = 'Ctrl-C pressed'
+        else:
+            title = 'Motion error: {!r}'.format(self.err)
+        return "<Orange>{}. Stopped all motors</Orange>. Waiting for motors to stop...".format(title)
+
+    def __call__(self):
+        if self.state == self.MOVING:
+            if self.motion.in_motion():
+                title = "<DeepSkyBlue>Moving...</DeepSkyBlue>"
+            else:
+                title = "<DarkKhaki>Preparing...</DarkKhaki>"
+        elif self.state == self.STOPPING:
+            title = self.error_title()
+        elif self.state == self.STOPPED:
+            title = self.error_title() + " [<Green>DONE</Green>]"
+        return HTML(title)
+
 
 def MotionBar(motion, *args, **kwargs):
+    title = Title(motion)
+
     def update(status):
         for bar, status in zip(bars, status):
             bar.motion_status = status
             bar.items_completed = abs(status.pos - status.start)
         progbar.invalidate()
 
+    def on_start_stop(exc_type, exc_value, tb):
+        title.state = title.STOPPING
+        title.err = exc_value
+
+    def on_end_stop():
+        title.state = title.STOPPED
+
+    motion.on_start_stop = on_start_stop
+    motion.on_end_stop = on_end_stop
+
     kwargs.setdefault("formatters", FORMATTERS)
     kwargs.setdefault("style", STYLE)
+    kwargs.setdefault("title", title)
     progbar = ProgressBar(*args, **kwargs)
     progbar.update = update
     bars = []
