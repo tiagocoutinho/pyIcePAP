@@ -50,6 +50,8 @@ def create_connection(host, port):
 
 
 def wait_open(sock, timeout=None):
+    if timeout < 0:
+        raise Timeout("timeout trying to connect")
     _, w, _ = select.select((), (sock,), (), timeout)
     if not w:
         err = sock.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)

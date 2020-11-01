@@ -113,7 +113,7 @@ class Title:
             title = 'Ctrl-C pressed'
         else:
             title = 'Motion error: {!r}'.format(self.err)
-        return "<Orange>{}. Stopped all motors</Orange>. Waiting for motors to stop...".format(title)
+        return "<Orange>{}</Orange>. Waiting for motors to stop...".format(title)
 
     def __call__(self):
         if self.state == self.MOVING:
@@ -160,6 +160,55 @@ def MotionBar(motion, *args, **kwargs):
         if total == 0:
             bar.items_completed = 1
             bar.done = True
+        bar.motion_status = status
+        bars.append(bar)
+    return progbar
+
+
+def BackAndForthBar(motion, *args, **kwargs):
+    title = Title(motion)
+
+    def update(status):
+        for bar, inital, status in zip(bars, motion.base_positions, status):
+            bar.motion_status = status
+            bar.items_completed = abs(status.pos - inital)
+        progbar.invalidate()
+
+    def on_start_stop(exc_type, exc_value, tb):
+        title.state = title.STOPPING
+        title.err = exc_value
+
+    def on_end_stop():
+        title.state = title.STOPPED
+
+    motion.on_start_stop = on_start_stop
+    motion.on_end_stop = on_end_stop
+
+    if "formatters" not in kwargs:
+        formatters =  [
+            Label(),
+            Text(" ["),
+            Start(),
+            Text(" => "),
+            Target(),
+            Text("] "),
+            Position(),
+            Text(" "),
+            Bar(sym_a="·", sym_b="\u2588", sym_c="·"),
+            Text(" "),
+            Progress(),
+        ]
+        kwargs["formatters"] = formatters
+    kwargs.setdefault("formatters", FORMATTERS)
+    kwargs.setdefault("style", STYLE)
+    kwargs.setdefault("title", title)
+    progbar = ProgressBar(*args, **kwargs)
+    progbar.update = update
+    bars = []
+    label_template = "{status.name}(#{status.motor.axis})"
+    for status, total in zip(motion.status, motion.displacements()):
+        label = label_template.format(status=status)
+        bar = progbar(label=label, total=total)
         bar.motion_status = status
         bars.append(bar)
     return progbar

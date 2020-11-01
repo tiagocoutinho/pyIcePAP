@@ -7,11 +7,11 @@ import click
 import beautifultable
 
 from icepap.group import Group
-from icepap.motion import Motion
+from icepap.motion import Motion, BackAndForth
 from icepap.controller import IcePAPController
 
 from .tools import ensure_power
-from .progress_bar import MotionBar
+from .progress_bar import MotionBar, BackAndForthBar
 
 CLEAR_LINE = '\x1b[2K'
 
@@ -75,7 +75,6 @@ def _pmove(group, positions, refresh_period=0.1):
     with progbar:
         try:
             with power, motion:
-                motion.start()
                 last_update, in_motion = 0, True
                 while in_motion:
                     nap = refresh_period - (time.monotonic() - last_update)
@@ -93,23 +92,28 @@ def pmove(*pair_motor_pos):
     _pmove(Group(motors), positions)
 
 
-def _pshake(group, rng):
+def _pshake(group, ranges, refresh_period=0.1):
     power = ensure_power(group)
-    motion = Shake(group, positions, on_start_stop=_start_stop, on_end_stop=_end_stop)
-    with power, motion:
-        with MotionBar(motion) as progbar:
-            motion.start()
-            last_update, in_motion = 0, True
-            try:
-                while True:
+    motion = BackAndForth(group, ranges)
+    progbar = BackAndForthBar(motion)
+    with progbar:
+        try:
+            with power, motion:
+                last_update, in_motion = 0, True
+                while in_motion:
                     nap = refresh_period - (time.monotonic() - last_update)
                     if nap > 0:
                         time.sleep(nap)
                     progbar.update(motion.update())
+                    in_motion = motion.in_motion()
                     last_update = time.monotonic()
-            finally:
-                progbar.update(motion.update())
+        finally:
+            progbar.update(motion.update())
 
+
+def pshake(*pair_motor_range):
+    motors, ranges = pair_motor_range[::2], pair_motor_range[1::2]
+    _pshake(Group(motors), ranges)
 
 # ------
 
@@ -220,6 +224,16 @@ def move(ctx, pairs, bar):
     positions = [int(position) for position in pairs[1::2]]
     func = _pmove if bar else _umove
     func(Group(motors), positions)
+
+
+@cli.command()
+@click.argument('pairs', nargs=-1, type=int)
+@click.pass_context
+def shake(ctx, pairs):
+    pap = ctx.obj['icepap']
+    motors = [pap[int(address)] for address in pairs[::2]]
+    ranges = [int(rang) for rang in pairs[1::2]]
+    _pshake(Group(motors), ranges)
 
 
 @cli.command()
