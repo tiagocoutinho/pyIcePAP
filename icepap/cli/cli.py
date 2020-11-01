@@ -5,27 +5,15 @@ import contextlib
 
 import click
 import beautifultable
-from prompt_toolkit.shortcuts import ProgressBar
 
-from .group import Group
+from icepap.group import Group
+from icepap.motion import Motion
+from icepap.controller import IcePAPController
+
 from .tools import ensure_power
-from .motion import Motion
-from .controller import IcePAPController
-
+from .progress_bar import MotionBar
 
 CLEAR_LINE = '\x1b[2K'
-
-
-@contextlib.contextmanager
-def motion_with_power(group, positions, on_start_stop=None, on_end_stop=None):
-    with contextlib.ExitStack() as stack:
-        power = ensure_power(group)
-        motion = Motion(group, positions,
-                        on_start_stop=on_start_stop,
-                        on_end_stop=on_end_stop)
-        stack.enter_context(power)
-        stack.enter_context(motion)
-        yield motion
 
 
 def _start_stop(etype, evalue, tb):
@@ -80,52 +68,44 @@ def umove(*pair_motor_pos):
     _umove(Group(motors), positions)
 
 
-def motion_bar(motion, **kwargs):
-    def refresh():
-        states, positions = group.get_states(), group.get_pos()
-        for bar, state, pos in zip(bars, states, positions):
-            bar.label = bar.label_template.format(pos)
-            bar.items_completed = abs(pos - bar.start_pos)
-        progbar.invalidate()
-
-    progbar = ProgressBar(**kwargs)
-    progbar.refresh = refresh
-
-    group = motion.group
-    args = zip(group.motors, group.get_names(), motion.start_positions,
-               motion.target_positions)
-    bars = []
-    for i, (motor, name, start_pos, target_pos) in enumerate(args):
-        sp, tp = str(start_pos), str(target_pos)
-        max_width = max(len(sp), len(tp))
-        label_template = '{} [{} to {}] (at {{:{}}})'.format(name, sp, tp, max_width)
-        displ = abs(target_pos - start_pos)
-        bar = progbar(label=label_template.format(start_pos), total=displ)
-        bar.label_template = label_template
-        bar.start_pos = start_pos
-        bars.append(bar)
-    return progbar
-
-
-def _pmove(group, positions, refresh_rate=0.1):
+def _pmove(group, positions, refresh_period=0.1):
     power = ensure_power(group)
     motion = Motion(group, positions, on_start_stop=_start_stop, on_end_stop=_end_stop)
     with power, motion:
-        with motion_bar(motion) as progbar:
+        with MotionBar(motion) as progbar:
             motion.start()
-            last_update = 0
-            while motion.in_motion():
-                nap = refresh_rate - (time.monotonic() - last_update)
+            last_update, in_motion = 0, True
+            while in_motion:
+                nap = refresh_period - (time.monotonic() - last_update)
                 if nap > 0:
                     time.sleep(nap)
-                progbar.refresh()
+                progbar.update(motion.update())
+                in_motion = motion.in_motion()
                 last_update = time.monotonic()
-            progbar.refresh()
+            progbar.update(motion.update())
 
 
 def pmove(*pair_motor_pos):
     motors, positions = pair_motor_pos[::2], pair_motor_pos[1::2]
     _pmove(Group(motors), positions)
+
+
+def _pshake(group, rng):
+    power = ensure_power(group)
+    motion = Shake(group, positions, on_start_stop=_start_stop, on_end_stop=_end_stop)
+    with power, motion:
+        with MotionBar(motion) as progbar:
+            motion.start()
+            last_update, in_motion = 0, True
+            try:
+                while True:
+                    nap = refresh_period - (time.monotonic() - last_update)
+                    if nap > 0:
+                        time.sleep(nap)
+                    progbar.update(motion.update())
+                    last_update = time.monotonic()
+            finally:
+                progbar.update(motion.update())
 
 
 # ------

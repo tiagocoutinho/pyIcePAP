@@ -1,6 +1,6 @@
 import contextlib
 
-from .group import group
+from icepap.group import group
 
 
 @contextlib.contextmanager

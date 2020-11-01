@@ -12,6 +12,7 @@ class Group:
         assert len(ctrls) == 1, 'motors must be from same controller'
         self._controller = ctrls.pop()
         self._motors = motors
+        self._names = None
 
     @property
     def controller(self):
@@ -20,6 +21,12 @@ class Group:
     @property
     def motors(self):
         return self._motors
+
+    @property
+    def names(self):
+        if self._names is None:
+            self._names = self.get_names()
+        return self._names
 
     @property
     def axes(self):

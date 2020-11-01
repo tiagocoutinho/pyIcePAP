@@ -1,4 +1,11 @@
+from collections import namedtuple
+
 from .group import group
+
+
+MotorMotionState = namedtuple(
+    "MotorMotionState", "motor name state pos start target"
+)
 
 
 class Motion:
@@ -10,9 +17,11 @@ class Motion:
         self.sync_stop = sync_stop
         self.on_start_stop = on_start_stop or (lambda *args: None)
         self.on_end_stop = on_end_stop or (lambda *args: None)
+        self.status = None
 
     def __enter__(self):
-        self.start_positions = self.group.get_fpos()
+        self.start_positions = pos = self.group.get_pos()
+        self.status = self._get_status(pos=pos, start=pos)
         return self
 
     def __exit__(self, exc_type, exc_value, traceback):
@@ -39,15 +48,31 @@ class Motion:
         except Exception as err:
             print(err)
 
+    def _get_status(self, states=None, pos=None, start=None):
+        args = (
+            self.group.motors,
+            self.group.names,
+            self.group.get_states() if states is None else states,
+            self.group.get_pos() if pos is None else pos,
+            self.start_positions if start is None else start,
+            self.target_positions
+        )
+        return [MotorMotionState(*info) for info in zip(*args)]
+
     def displacements(self):
         return [abs(target - start)
                 for target, start in zip(self.target_positions, self.start_positions)]
 
-    def in_motion(self):
-        return self.group.is_moving()
 
     def start(self):
         return self.group.start_move(self.target_positions)
 
     def stop(self):
         return self._stop()
+
+    def update(self):
+        self.status = self._get_status()
+        return self.status
+
+    def in_motion(self):
+        return any(status.state.is_moving() for status in self.status)
